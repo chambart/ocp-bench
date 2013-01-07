@@ -1,0 +1,57 @@
+OASISFormat: 0.3
+Name:        ocp-bench
+Version:     0.1
+Synopsis:    Benchmarking tool
+Authors:     Pierre Chambart
+License:     LGPL-2.1 with OCaml linking exception
+Plugins:     DevFiles (0.3), META (0.3)
+BuildTools:  ocamlbuild
+
+Library bench_core
+  Path: src
+  Modules:
+    Options_t,
+    Options_v,
+    Options_j,
+    BenchCore
+  FindlibName: ocp-bench
+  BuildDepends:
+    lwt.unix,
+    atdgen,
+    lwt.syntax,
+    lwt.syntax.log,
+    opam
+
+Executable "ocp-bench"
+  Path: src
+  MainIs: benchRun.ml
+  CompiledObject: best
+  BuildDepends:
+   ocp-bench,
+   lwt.unix,
+   atdgen,
+   lwt.syntax,
+   lwt.syntax.log,
+   opam
+
+Executable "ocp-bench-report"
+  Path: src
+  MainIs: benchReport.ml
+  CompiledObject: best
+  BuildDepends:
+   ocp-bench,
+   lwt.unix,
+   atdgen,
+   lwt.syntax,
+   lwt.syntax.log,
+   opam
+
+# +-------------------------------------------------------------------+
+# | Misc                                                              |
+# +-------------------------------------------------------------------+
+
+SourceRepository head
+  Type: git
+  Location: https://github.com/chambart/ocp-bench.git
+  Browser: https://github.com/chambart/ocp-bench
+

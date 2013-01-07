@@ -1,0 +1,50 @@
+
+type file = string
+
+type bench = {
+  name : string;
+  executable : string;
+  ~args : string list;
+  ?expected : file option;
+  ?gc_output : file option;
+} <ocaml field_prefix="bench_">
+
+type batch = {
+  name : string;
+  ?opam_alias : string option;
+  ?env : (string*string) list option;
+  ~perf_events : string list;
+  ?criterion : string option;
+} <ocaml field_prefix="batch_">
+
+type bench_list = bench list
+
+type measure = {
+  name : string;
+  mean : float;
+  variance : float;
+  standard_deviation : float;
+  results : float list;
+} <ocaml field_prefix="measure_">
+
+type bench_id = int
+
+type bench_res = {
+  name : string;
+  count : int;
+  measures : measure list;
+} <ocaml field_prefix="result_">
+
+type bench_result =
+  [ Success of bench_res
+  | Failure of string ]
+
+type batch_result = {
+  batch : batch;
+  results : (bench_id * bench_result) list;
+}
+
+type batch_results = {
+  benchs : (bench_id * bench) list;
+  batchs : batch_result list
+} <ocaml field_prefix="results_">

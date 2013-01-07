@@ -1,0 +1,6 @@
+
+{ name: "system",
+  opam_alias: "system",
+  perf_events: [ "cycles", "instructions" ],
+  criterion: "cycles" }
+

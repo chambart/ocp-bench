@@ -38,3 +38,4 @@
 # OASIS_STOP
 
 <src/bench*.ml{,i}>: syntax_camlp4o
+<src/options_j.ml{,i}>: std_json

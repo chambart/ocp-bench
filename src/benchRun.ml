@@ -84,12 +84,17 @@ let main () =
     let () = Printf.printf "%s\n%!" (Options_j.string_of_bench_result result) in
     Lwt.return (id,result)
   in
-  let aux_batch benchs batch =
-    lwt runners = bench_runs batch benchs in
+  let aux_batch (runners,batch) =
     lwt r = Lwt_list.map_s aux_runner runners in
     Lwt.return { batch; results = r }
   in
-  lwt results = Lwt_list.map_s (aux_batch benchs) batchs in
+  lwt batch_runners =
+    Lwt_list.map_s (fun batch ->
+        lwt runners = bench_runs batch benchs in
+        Lwt.return (runners,batch))
+      batchs
+  in
+  lwt results = Lwt_list.map_s aux_batch batch_runners in
   let result = { results_benchs = benchs; results_batchs = results; } in
   output result
 

@@ -1,9 +1,13 @@
 let result_files = ref []
 let reference_batch : string option ref = ref None
 let report_measure = ref "user time"
+let display_list = ref false
 
 let spec =
   [
+    "-r", Arg.String (fun s -> reference_batch := Some s), "reference";
+    "-m", Arg.String (fun s -> report_measure := s), "displayed measure";
+    "-l", Arg.Set display_list, "list recorded measures";
   ]
 
 let usage = "show report"
@@ -39,6 +43,8 @@ end = struct
     fun () -> incr c; !c
 end
 module BatchMap = MyMap(Batch)
+
+module StringSet = Set.Make(String)
 
 type res = {
   benchs : (id * bench) list;
@@ -108,6 +114,41 @@ let load_result file =
   let s = Yojson.init_lexer ~fname:file () in
   Options_j.read_batch_results s l
 
+let get_reference map =
+  let min_bind = fst (BatchMap.min_binding map) in
+  match !reference_batch with
+  | None -> min_bind
+  | Some name ->
+     let v = BatchMap.fold (fun k v acc ->
+       if v.batch_name = name
+       then Some k
+       else acc) map None in
+     match v with
+     | None -> min_bind
+     | Some v -> v
+
+let (<|) f g x = f (g x)
+
+let equal_name_length l =
+  let l = List.map (fun (id, x) -> id, x.bench_name) l in
+  let len = List.map (String.length <| snd) l in
+  let max_len = List.fold_left max 0 len in
+  List.map (fun (id, s) -> id, s ^ (String.make (max_len - (String.length s)) ' ')) l
+
+let measure_names results =
+  let set = ref StringSet.empty in
+  List.iter (fun batch_res ->
+    List.iter (fun (_, bench_result) ->
+      match bench_result with
+      | `Failure _ -> ()
+      | `Success { result_measures } ->
+         List.iter ( fun { measure_name } ->
+           if not (StringSet.mem measure_name !set)
+           then set := StringSet.add measure_name !set ) result_measures)
+              batch_res.results)
+            results.results_batchs;
+  StringSet.elements !set
+
 let main () =
   let results =
     match !result_files with
@@ -115,16 +156,27 @@ let main () =
     | _ ->
        Arg.usage spec usage;
        exit 1 in
-  let res = prepare_batch results in
-  let map = invert !report_measure res in
-  let (reference_batch,_) = BatchMap.min_binding res.batch_map in
-  let norm = IdMap.map (normalize reference_batch) map in
-  let print (k:Batch.t) = function
-    | `Success (m,et) -> Printf.printf "%i: %.3f (%.3f) " (k:>int) m et
-    | `Failure _ -> Printf.printf "%i: ____ ____ " (k:>int)
-  in
-  IdMap.iter (fun _ res ->
-              BatchMap.iter print res;
-              print_newline ()) norm
+  if !display_list
+  then begin
+    List.iter print_endline (measure_names results)
+    end
+  else begin
+    let res = prepare_batch results in
+    let map = invert !report_measure res in
+    let reference_batch = get_reference res.batch_map in
+    let norm = IdMap.map (normalize reference_batch) map in
+    BatchMap.iter (fun k batch -> Printf.printf "%s: %i " batch.batch_name (k:Batch.t:>int)) res.batch_map;
+    print_newline ();
+    let print (k:Batch.t) = function
+      | `Success (m,et) -> Printf.printf "%i: %.3f (%.3f) " (k:>int) m et
+      | `Failure _ -> Printf.printf "%i: ____ ____ " (k:>int)
+    in
+    let bench_names = equal_name_length res.benchs in
+    IdMap.iter (fun bench_id v ->
+                let bench_name = List.assoc bench_id bench_names in
+                Printf.printf "%s: " bench_name;
+                BatchMap.iter print v;
+                print_newline ()) norm
+    end
 
 let () = main ()

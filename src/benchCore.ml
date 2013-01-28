@@ -23,8 +23,12 @@ type perf_options = {
   perf_output : file;
 }
 
+type gc_output =
+  | Fixed_file of file
+  | Env_var of string
+
 type gc_options = {
-  gc_output : file;
+  gc_output : gc_output;
 }
 
 type time_info =
@@ -99,7 +103,14 @@ let make_env = function
      let l' = List.map (fun (name,value) -> name ^ "=" ^ value) l in
     Some (Array.of_list l')
 
+let print_command (executable, options) =
+  let components = match Array.to_list options with
+    | [] -> [executable]
+    | t::q -> executable::q in
+  String.concat " " components
+
 let run_process ?src_stdin ?dest_stdout ?dest_stderr ?env command =
+  lwt () = Lwt_log.info_f ~section "run command %s" (print_command command) in
   with_files_in_out_out src_stdin dest_stdout dest_stderr
     (fun fd_stdin fd_stdout fd_stderr ->
      Lwt_process.with_process_none
@@ -227,6 +238,8 @@ let parse_gc runner file =
   | Unix.Unix_error(Unix.ENOENT, "open", f) ->
      raise_lwt (Err (Runner runner, File_not_present f))
 
+let gc_out_file : unit -> file = fun _ -> "run.gc_stat"
+
 let launch_bench : bench run -> bench run_result Lwt.t = fun runner ->
   let Bench options = runner.kind in
   let t1 = Unix.gettimeofday () in
@@ -244,8 +257,11 @@ let launch_bench : bench run -> bench run_result Lwt.t = fun runner ->
   lwt res = match options.gc_options with
     | None -> Lwt.return res
     | Some { gc_output } ->
-       lwt gc_result = parse_gc runner gc_output in
-       Lwt.return (( List.map (fun (n,v) -> Gc_info n, v) gc_result ) @ res)
+      let out_file = match gc_output with
+        | Fixed_file f -> f
+        | Env_var _ -> gc_out_file () in
+      lwt gc_result = parse_gc runner out_file in
+      Lwt.return (( List.map (fun (n,v) -> Gc_info n, v) gc_result ) @ res)
   in
   Lwt.return (Bench_result res)
 
@@ -392,8 +408,7 @@ let continue_loop : type kind . kind run ->
           raise (Err (Runner runner,
             Termination_criterion_not_recorded criterion))
      in
-     min_measures < state.count ||
-     need_more c crit
+     min_measures >= state.count || need_more c crit
 
 type 'a result =
   | Error of runner * error
@@ -404,21 +419,20 @@ let warm_up : type kind. kind run -> unit Lwt.t = fun runner ->
   | Test _ -> Lwt.return ()
   | Bench { measure_conditions = { warm_up_time } } ->
      lwt () = Lwt_log.info_f ~section "warm_up %f" warm_up_time in
-     let t = ref 0. in
+     let init_time = Unix.gettimeofday () in
      let i = ref 0 in
      let rec aux () =
-       if !t >= warm_up_time
+       let current_time = Unix.gettimeofday () in
+       if current_time -. init_time >= warm_up_time
        then Lwt.return ()
        else
-         let t1 = Unix.gettimeofday () in
          lwt _ = run runner in
-         let t2 = Unix.gettimeofday () in
          incr i;
-         t := !t +. (t2 -. t1);
          aux ()
      in
      lwt () = aux () in
-     Lwt_log.info_f ~section "warm_up done: %i times in %f seconds" !i !t
+     let current_time = Unix.gettimeofday () in
+     Lwt_log.info_f ~section "warm_up done: %i times in %f seconds" !i (current_time -. init_time)
 
 let loop_launch' : type kind . kind run -> kind loop_state Lwt.t = fun runner ->
   lwt () = warm_up runner in
@@ -431,6 +445,7 @@ let loop_launch' : type kind . kind run -> kind loop_state Lwt.t = fun runner ->
       let state = update_state state result in
       loop state
     else
+      lwt () = Lwt_log.info_f ~section "loop end" in
       Lwt.return state
   in
   loop init
@@ -610,6 +625,15 @@ let criterion_of_string = function
   | "sys_time" -> Time_info Sys_time
   | s -> Perf_event s
 
+let load_gc_options bench =
+  match bench.bench_gc_output, bench.bench_gc_env_file with
+  | _, Some e ->
+    Some { gc_output = Env_var e }
+  | Some f, None ->
+    Some { gc_output = Fixed_file f }
+  | None, None ->
+    None
+
 let load_bench_option batch bench =
   match batch.batch_criterion with
   | None -> None
@@ -617,13 +641,14 @@ let load_bench_option batch bench =
      Some
        { measure_conditions = fast;
          perf_options = perf_options bench batch;
-         gc_options = None;
+         gc_options = load_gc_options bench;
          criterion = criterion_of_string criterion }
 
 let load_test_options batch bench = None
 
-let perf_command options (_, command) =
-  let command = String.concat " " (Array.to_list command) in
+let perf_command options (exec_path, command) =
+  let command = exec_path :: (List.tl (Array.to_list command)) in (* command does not contains the full path *)
+  let command = String.concat " " command in
   let events = List.flatten (List.map (fun s -> ["-e";s]) options.events) in
   "/usr/bin/perf",
   Array.of_list
@@ -639,13 +664,24 @@ let default_command_line = {
   rundir = None;
 }
 
+let split_env_line l = Scanf.sscanf l "%s@=%s" (fun s v -> s,v)
+let environment = Array.to_list (Array.map split_env_line (Unix.environment ()))
+let add_env (key,v) env =
+  (key,v) :: (List.remove_assoc key env)
+let add_if_not ((key,_) as v) = function
+  | None -> Some [v]
+  | Some env ->
+     Some (if List.mem_assoc key env
+           then env
+           else v :: env)
+
 let load_run' ?(command_line=default_command_line) batch bench =
   let test_options = load_test_options batch bench in
   let bench_options = load_bench_option batch bench in
-  let make command kind =
+  let make ?(env=batch.batch_env) command kind =
     { name = bench.bench_name;
       command = command;
-      env = batch.batch_env;
+      env;
     (* TODO: populate *)
       stdin = None;
       stdout = None;
@@ -662,11 +698,20 @@ let load_run' ?(command_line=default_command_line) batch bench =
   let bench = match bench_options with
     | None -> []
     | Some opt ->
-       let command =
-         match opt.perf_options with
-         | None -> basic_command
-         | Some perf_options -> perf_command perf_options basic_command in
-       [Runner (make command (Bench opt))] in
+      let env = match opt with
+        | { gc_options = Some { gc_output = Env_var var } } ->
+          let gc_out_var = var,gc_out_file () in
+          begin match batch.batch_env with
+          | None -> Some [gc_out_var]
+          | Some l -> Some (gc_out_var :: l) end
+        | _ -> batch.batch_env in
+      let command, env =
+        match opt.perf_options with
+        | None -> basic_command, env
+        | Some perf_options ->
+           let env = add_if_not ("PATH", Sys.getenv "PATH") env in
+           perf_command perf_options basic_command, env in
+      [Runner (make ~env command (Bench opt))] in
   test @ bench
 
 let load_run ?command_line batch bench =

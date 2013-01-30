@@ -1,8 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: c65fd93be4df9e9a4ab03a4eeed1d4ef)
+# DO NOT EDIT (digest: 464bf8f4a8ac7d8e07c9ae2ec0718138)
 version = "0.1"
 description = "Benchmarking tool"
-requires = "lwt.unix atdgen lwt.syntax lwt.syntax.log opam"
+requires = "lwt.unix atdgen lwt.syntax lwt.syntax.log archimedes opam"
 archive(byte) = "bench_core.cma"
 archive(byte, plugin) = "bench_core.cma"
 archive(native) = "bench_core.cmxa"

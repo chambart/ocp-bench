@@ -1,4 +1,4 @@
-open Options_t
+open BenchFiles_t
 
 let mean a =
   let s = ref 0. in
@@ -111,7 +111,9 @@ module StringMap = MyMap(String)
 
 type res = {
   benchs : (id * bench) list;
+  bench_id : id StringMap.t;
   batch_map : batch BatchMap.t;
+  batch_id : Batch.t StringMap.t;
   res_map : (bench_result IdMap.t) BatchMap.t;
 }
 

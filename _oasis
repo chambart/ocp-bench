@@ -10,16 +10,19 @@ BuildTools:  ocamlbuild
 Library bench_core
   Path: src
   Modules:
-    Options_t,
-    Options_v,
-    Options_j,
-    BenchCore
+    BenchFiles_t,
+    BenchFiles_v,
+    BenchFiles_j,
+    BenchCore,
+    BenchCommon,
+    BenchStat
   FindlibName: ocp-bench
   BuildDepends:
     lwt.unix,
     atdgen,
     lwt.syntax,
     lwt.syntax.log,
+    archimedes,
     opam
 
 Executable "ocp-bench"

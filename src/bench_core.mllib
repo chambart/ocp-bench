@@ -1,7 +1,9 @@
 # OASIS_START
-# DO NOT EDIT (digest: 65f17132a729c1f697873657e549cb39)
-Options_t
-Options_v
-Options_j
+# DO NOT EDIT (digest: eb85d037b8a804465a337bd1a7c1720c)
+BenchFiles_t
+BenchFiles_v
+BenchFiles_j
 BenchCore
+BenchCommon
+BenchStat
 # OASIS_STOP

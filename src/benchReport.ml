@@ -1,13 +1,28 @@
+open BenchCommon
+
 let result_files = ref []
 let reference_batch : string option ref = ref None
 let report_measure = ref "user time"
 let display_list = ref false
+let display_graph = ref false
+
+let current_batch = ref None
+let choice_list = ref []
+let add_bench bench =
+  match !current_batch with
+  | None ->
+    Printf.eprintf "use -b to choose a batch\n%!";
+    exit 1
+  | Some batch ->
+    choice_list := (bench,batch):: !choice_list
 
 let spec =
   [
     "-r", Arg.String (fun s -> reference_batch := Some s), "reference";
     "-m", Arg.String (fun s -> report_measure := s), "displayed measure";
     "-l", Arg.Set display_list, "list recorded measures";
+    "-b", Arg.String (fun s -> current_batch := Some s), "choosen batch for graph";
+    "-e", Arg.String add_bench, "choosen bench for graph";
   ]
 
 let usage = "show report"
@@ -16,41 +31,7 @@ let annon_fun s = result_files := s :: !result_files
 
 let () = Arg.parse spec annon_fun usage
 
-open Options_t
-
-module MyMap(O:Map.OrderedType) = struct
-  include Map.Make(O)
-  let of_list l = List.fold_left (fun m (id,v) -> add id v m) empty l
-  let to_list = bindings
-end
-
-type id = int
-module Id = struct
-  type t = id
-  let compare = (-)
-end
-module IdMap = MyMap(Id)
-
-module Batch : sig
-  type t = private int
-  val compare : t -> t -> int
-  val create : unit -> t
-end = struct
-  type t = int
-  let compare = (-)
-  let create =
-    let c = ref (-1) in
-    fun () -> incr c; !c
-end
-module BatchMap = MyMap(Batch)
-
-module StringSet = Set.Make(String)
-
-type res = {
-  benchs : (id * bench) list;
-  batch_map : batch BatchMap.t;
-  res_map : (bench_result IdMap.t) BatchMap.t
-}
+open BenchFiles_t
 
 let prepare_batch batch_results =
   let l =
@@ -58,8 +39,13 @@ let prepare_batch batch_results =
               Batch.create (), results_batch.batch, IdMap.of_list results_batch.results)
              batch_results.results_batchs in
   let batch_map = BatchMap.of_list (List.map (fun (id,batch,_) -> (id,batch)) l) in
+  let batch_id = StringMap.of_list (List.map (fun (id,batch,_) ->
+        (batch.batch_name,id)) l) in
+  let bench_id = StringMap.of_list (List.map (fun (id,bench) ->
+        (bench.bench_name,id)) batch_results.results_benchs) in
   let res_map = BatchMap.of_list (List.map (fun (id,_,r) -> (id,r)) l) in
-  { benchs = batch_results.results_benchs; batch_map; res_map }
+  { benchs = batch_results.results_benchs; bench_id;
+    batch_map; batch_id; res_map }
 
 let bench_results res id name =
   let aux key map acc =
@@ -112,7 +98,7 @@ let invert measure_name res =
 let load_result file =
   let l = Lexing.from_channel (open_in file) in
   let s = Yojson.init_lexer ~fname:file () in
-  Options_j.read_batch_results s l
+  BenchFiles_j.read_batch_results s l
 
 let get_reference map =
   let min_bind = fst (BatchMap.min_binding map) in
@@ -152,15 +138,18 @@ let measure_names results =
 let main () =
   let results =
     match !result_files with
-    | [r] -> load_result r
-    | _ ->
+    | _::_ as l ->
+      let l = List.map load_result l in
+      fuse_results l
+    | [] ->
        Arg.usage spec usage;
        exit 1 in
-  if !display_list
-  then begin
-    List.iter print_endline (measure_names results)
-    end
-  else begin
+  match !display_list, !choice_list with
+  | true, _ -> List.iter print_endline (measure_names results)
+  | false, _::_ ->
+    let res = prepare_batch results in
+    BenchStat.run_plot res !report_measure !choice_list
+  | _ ->
     let res = prepare_batch results in
     let map = invert !report_measure res in
     let reference_batch = get_reference res.batch_map in
@@ -177,6 +166,5 @@ let main () =
                 Printf.printf "%s: " bench_name;
                 BatchMap.iter print v;
                 print_newline ()) norm
-    end
 
 let () = main ()
